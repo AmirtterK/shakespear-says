@@ -1,41 +1,28 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { useState } from "react";
 import { motion } from "framer-motion";
-import { Loader2, RotateCcw } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { Toaster } from "@/components/ui/sonner";
 
 type Result = {
-  intent: string;
-  subject: string;
   text: string;
 };
 
 export default function Home() {
-  const [prompt, setPrompt] = useState("");
   const [result, setResult] = useState<Result | null>(null);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (!prompt.trim()) {
-      setError("Enter something first.");
-      return;
-    }
-
+  async function handleGenerate() {
     setIsLoading(true);
     setError("");
 
     try {
       const response = await fetch("/api/generate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt }),
       });
 
       const data = await response.json();
@@ -56,12 +43,6 @@ export default function Home() {
     }
   }
 
-  function handleRefresh() {
-    setPrompt("");
-    setResult(null);
-    setError("");
-  }
-
   return (
     <main className="min-h-screen bg-background flex flex-col">
       <Toaster position="bottom-right" />
@@ -77,38 +58,27 @@ export default function Home() {
       {/* Content */}
       <div className="flex-1 overflow-auto px-4 py-8">
         <div className="mx-auto max-w-2xl space-y-6">
-          {/* Input Section */}
+          {/* Generate Button */}
           <motion.div
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             className="space-y-3"
           >
-            <form onSubmit={handleSubmit} className="space-y-3">
-              <Textarea
-                value={prompt}
-                onChange={(e) => {
-                  setPrompt(e.target.value);
-                  setError("");
-                }}
-                placeholder="insult a lazy programmer"
-                className="min-h-20 resize-none text-base"
-              />
-              <Button
-                type="submit"
-                disabled={isLoading}
-                className="w-full"
-                size="lg"
-              >
-                {isLoading ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Generating...
-                  </>
-                ) : (
-                  "Generate"
-                )}
-              </Button>
-            </form>
+            <Button
+              onClick={handleGenerate}
+              disabled={isLoading}
+              className="w-full"
+              size="lg"
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Generating...
+                </>
+              ) : (
+                "Generate a Random Line"
+              )}
+            </Button>
           </motion.div>
 
           {/* Error */}
@@ -134,15 +104,6 @@ export default function Home() {
                   {result.text}
                 </p>
               </div>
-              {/* Refresh Button */}
-              <Button
-                onClick={handleRefresh}
-                variant="outline"
-                className="w-full"
-              >
-                <RotateCcw className="mr-2 h-4 w-4" />
-                New Text
-              </Button>
             </motion.div>
           )}
         </div>
