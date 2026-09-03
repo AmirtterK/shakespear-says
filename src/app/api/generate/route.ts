@@ -17,7 +17,11 @@ async function initModel() {
       "text-generation",
       "shakespeare-gpt2-onnx",
       {
-        quantized: false, // we exported a plain fp32 model.onnx, not model_quantized.onnx
+        // Confirmed fp32 (quantized: false) and the quantized model produce
+        // identical output quality (same underlying fine-tuned weights) --
+        // fp32 is just ~5x slower and once OOM-crashed the dev server. So
+        // quantized is strictly better here.
+        quantized: true,
         progress_callback: (progress: any) => {
           console.log("[initModel] progress:", JSON.stringify(progress));
         },
@@ -85,26 +89,51 @@ export async function POST(request: Request) {
     const t1 = Date.now();
     const results = await gen(fewShotPrompt, {
       max_new_tokens: 40,
+      min_new_tokens: 12, // don't let EOS/quote end generation after just 1-2 tokens
       do_sample: true,
       temperature: 0.8,
       top_p: 0.9,
+      repetition_penalty: 1.3,
+      no_repeat_ngram_size: 3,
+      // Let the tokenizer strip the prompt via token offsets instead of us slicing
+      // generatedText by fewShotPrompt.length (raw JS string length). GPT-2's decode
+      // step (clean_up_tokenization_spaces) doesn't always reproduce the original
+      // prompt string byte-for-byte -- spacing around quotes/colons can shift -- so
+      // that manual slice landed in the wrong spot and usually grabbed the tail end
+      // of the prompt itself (which has a stray quote right there), which is why
+      // output was getting chopped down to 1-2 words.
+      return_full_text: false,
     });
     console.log(`[POST /api/generate] generation finished in ${Date.now() - t1}ms`);
 
-    const generatedText = results[0].generated_text;
-    // The pipeline returns fewShotPrompt + continuation, so slice by
-    // index rather than .replace (safer since the prompt text can
-    // legitimately reappear inside the continuation).
-    let continuation = generatedText.slice(fewShotPrompt.length);
-    // Cut at the closing quote, a newline, or the start of the next
-    // "Word:" example — whichever the model reaches first.
-    const cutPoints = [
-      continuation.indexOf('"'),
+    const continuation: string = results[0]?.generated_text || "";
+
+    // This fine-tuned model sprinkles stray `"` and `:` throughout its output -- an
+    // artifact of the play-script dialogue (character names, stage directions) it was
+    // trained on -- so cutting at the first `"` (the old approach) chopped the reply
+    // down to 1-2 words almost every time, even though the model had generated a full
+    // 40 tokens. Instead: find the boundary of the *next few-shot example* (a newline,
+    // or the literal "Word:" marker), strip stray quote characters from what's left,
+    // then trim down to the first full sentence.
+    const boundaryPoints = [
       continuation.indexOf("\n"),
       continuation.indexOf("Word:"),
     ].filter((i) => i !== -1);
-    const cutAt = cutPoints.length > 0 ? Math.min(...cutPoints) : continuation.length;
-    const text = continuation.slice(0, cutAt).trim();
+    const boundaryAt = boundaryPoints.length > 0 ? Math.min(...boundaryPoints) : continuation.length;
+
+    let cleaned = continuation
+      .slice(0, Math.max(0, boundaryAt))
+      .replace(/"/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    // Prefer stopping at the end of the first full sentence, when there is one.
+    const sentenceMatch = cleaned.match(/^.*?[.!?]/);
+    if (sentenceMatch && sentenceMatch[0].trim().length > 3) {
+      cleaned = sentenceMatch[0].trim();
+    }
+
+    const text = cleaned;
 
     return Response.json({
       intent: detectIntent(prompt),

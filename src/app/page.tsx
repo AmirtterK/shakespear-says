@@ -68,7 +68,8 @@ export default function Home() {
 
       {/* Header */}
       <div className="border-b bg-secondary/30 py-4 px-4">
-        <div className="mx-auto max-w-2xl">
+        <div className="mx-auto max-w-2xl flex items-center gap-3">
+          <img src="/shakespeare.jpg" alt="Shakespeare" className="w-10 h-10 rounded-full object-cover" />
           <h1 className="text-2xl font-bold">Shakespeare Says</h1>
         </div>
       </div>
@@ -133,19 +134,6 @@ export default function Home() {
                   {result.text}
                 </p>
               </div>
-
-              {/* Metadata */}
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <span className="inline-block px-2 py-1 bg-secondary rounded">
-                  {result.intent}
-                </span>
-                {result.subject && (
-                  <span className="inline-block px-2 py-1 bg-secondary rounded">
-                    {result.subject}
-                  </span>
-                )}
-              </div>
-
               {/* Refresh Button */}
               <Button
                 onClick={handleRefresh}
