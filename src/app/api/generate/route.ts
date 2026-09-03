@@ -123,7 +123,9 @@ export async function POST(request: Request) {
 
     let cleaned = continuation
       .slice(0, Math.max(0, boundaryAt))
-      .replace(/"/g, "")
+      .replace(/"/g, " ") // space, not "" -- a quote sitting between two words with no
+      // surrounding whitespace (e.g. `his"She`) would otherwise weld them into
+      // `hisShe`; the following \s+ -> " " collapses any doubled-up spacing this adds
       .replace(/\s+/g, " ")
       .trim();
 
