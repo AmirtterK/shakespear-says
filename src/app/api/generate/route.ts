@@ -129,10 +129,16 @@ export async function POST(request: Request) {
       .replace(/\s+/g, " ")
       .trim();
 
-    // Prefer stopping at the end of the first full sentence, when there is one.
-    const sentenceMatch = cleaned.match(/^.*?[.!?]/);
-    if (sentenceMatch && sentenceMatch[0].trim().length > 3) {
-      cleaned = sentenceMatch[0].trim();
+    // NOTE: we used to cut down to the first full sentence here (first ".", "!", or
+    // "?"). That was the actual regression -- this model loves short Shakespearean
+    // interjections ("Hark!", "Fie!", "Pray!") that show up in the first few words and
+    // already end in "!", so that rule kept chopping every reply down to just the
+    // interjection ("it keeps saying hark"). We rely on max_new_tokens (40) and the
+    // boundary cut above to bound length instead, and only trim an actual run-on if
+    // it's unreasonably long.
+    if (cleaned.length > 220) {
+      const lastBreak = cleaned.slice(0, 220).lastIndexOf(" ");
+      cleaned = cleaned.slice(0, lastBreak > 0 ? lastBreak : 220).trim();
     }
 
     const text = cleaned;
