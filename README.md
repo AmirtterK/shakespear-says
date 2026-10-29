@@ -2,7 +2,7 @@
 
 <img src="public/shakespeare.png" alt="Shakespeare" width="120">
 
-A GPT-2 powered web app that generates Shakespeare-style passages at the click of a button.
+A text generator that produces Shakespearean-style lines. Built on a GPT-2 model tuned on Shakespeare's works and run fully locally via a quantized ONNX model.
 
 ---
 
