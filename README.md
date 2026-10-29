@@ -1,12 +1,72 @@
+# Shakespeare Says
 
-Shakespeare Says
-=================
-
-![Shakespeare](public/shakespeare.jpg)
+![Shakespeare](public/shakespeare.png)
 
 Shakespeare Says is a small web app with a single button: press it, and a
 GPT-2 model fine-tuned on Shakespeare's plays generates a short, new passage
 in his style.
+
+---
+
+## Quick Start
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/AmirtterK/shakespear-says.git
+cd shakespear-says
+```
+
+### 2. Download the ONNX model
+
+The model weights are **not** included in the repo (they're ~244 MB).
+Download the zip from Google Drive:
+
+> **[Download shakespeare-gpt2-onnx.zip](https://drive.google.com/file/d/1w09MhZ7-cEPnNVCwhavbdJuuYNNb4iet/view?usp=drive_link)**
+
+### 3. Extract the model
+
+Unzip the downloaded file into `src/lib/` so the folder structure looks like
+this:
+
+```
+src/
+└── lib/
+    └── shakespeare-gpt2-onnx/
+        ├── config.json
+        ├── generation_config.json
+        ├── merges.txt
+        ├── special_tokens_map.json
+        ├── tokenizer.json
+        ├── tokenizer_config.json
+        ├── vocab.json
+        └── onnx/
+            └── model_quantized.onnx
+```
+
+> **Tip:** If the zip extracts into a nested folder, make sure
+> `shakespeare-gpt2-onnx/` sits directly inside `src/lib/`.
+
+### 4. Install dependencies
+
+```bash
+npm install
+```
+
+### 5. Run the development server
+
+```bash
+npm run dev
+```
+
+### 6. Open the app
+
+Navigate to **[http://localhost:3000](http://localhost:3000)** in your browser.
+
+The model loads automatically on first visit — you'll see a loading orb and
+progress bar. Once loaded, hit **Generate** to summon an Elizabethan passage.
+
+---
 
 ## How it works
 
@@ -36,20 +96,20 @@ in his style.
 - `scripts/train_shakespeare.py` is an older word-level n-gram model kept for
   reference; the app does not use it.
 
-## Running locally
+---
 
-The model weights are not in git (see `.gitignore`). Put the exported model in
-`src/lib/shakespeare-gpt2-onnx/` (see "Retraining" below), then:
+## Testing
+
+With the dev server running:
 
 ```bash
-npm install
-npm run dev
+node test_generation.mjs
 ```
 
-Open [http://localhost:3000](http://localhost:3000). With the dev server
-running, `node test_generation.mjs` generates 20 lines and checks them for
-formatting problems, repeats, and leaked stage directions. Always read the
-samples it prints too.
+This generates 20 lines and checks them for formatting problems, repeats, and
+leaked stage directions.
+
+---
 
 ## Retraining (Google Colab, free T4 GPU)
 
