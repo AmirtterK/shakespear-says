@@ -20,6 +20,9 @@
 # production
 /build
 
+# generated training data
+/data/processed
+
 # misc
 .DS_Store
 *.pem

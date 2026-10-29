@@ -1,207 +1,122 @@
 import { pipeline, env } from "@xenova/transformers";
 import path from "path";
 
-// Force transformers.js to load from disk, not the Hugging Face Hub
+// Load the model from disk (src/lib/shakespeare-gpt2-onnx), never from the Hugging Face Hub.
 env.allowRemoteModels = false;
 env.localModelPath = path.join(process.cwd(), "src", "lib");
 
-let generator: any = null;
+// Keep the loaded pipeline across hot reloads / requests so the model is only read once.
+const globalForModel = globalThis as unknown as { __shakespeareGenerator?: Promise<any> };
 
-async function initModel() {
-  if (!generator) {
-    console.log("[initModel] start, generator not yet cached");
-    console.log("Loading local Shakespeare GPT-2 model...");
-    const t0 = Date.now();
-    // Load from local folder: src/lib/shakespeare-gpt2-onnx
-    generator = await pipeline(
-      "text-generation",
-      "shakespeare-gpt2-onnx",
-      {
-        // Confirmed fp32 (quantized: false) and the quantized model produce
-        // identical output quality (same underlying fine-tuned weights) --
-        // fp32 is just ~5x slower and once OOM-crashed the dev server. So
-        // quantized is strictly better here.
-        quantized: true,
-        progress_callback: (progress: any) => {
-          console.log("[initModel] progress:", JSON.stringify(progress));
-        },
-      }
-    );
-    console.log(`[initModel] pipeline() resolved in ${Date.now() - t0}ms`);
-  } else {
-    console.log("[initModel] using cached generator");
+function getGenerator() {
+  if (!globalForModel.__shakespeareGenerator) {
+    const started = Date.now();
+    globalForModel.__shakespeareGenerator = pipeline("text-generation", "shakespeare-gpt2-onnx", {
+      quantized: true, // loads onnx/decoder_model_merged_quantized.onnx
+    })
+      .then((generator) => {
+        console.log(`[generate] model loaded in ${Date.now() - started}ms`);
+        return generator;
+      })
+      .catch((error) => {
+        globalForModel.__shakespeareGenerator = undefined; // allow a retry on the next request
+        throw error;
+      });
   }
-  return generator;
+  return globalForModel.__shakespeareGenerator;
 }
 
-const FEW_SHOT_EXAMPLES = [
-  { word: "apple", line: "What fruit is this, so crimson and forbidden, that tempted Eve herself to sin?" },
-  { word: "dog", line: "Beware the dog that fawns and barks by day, for silent teeth may bite thee in the night." },
-  { word: "war", line: "When drums of war do beat, all peace lies slain upon the trampled field." },
-  { word: "king", line: "Uneasy lies the head that wears the crown, for kings must reign in constant dread." },
-  { word: "storm", line: "The storm doth rage as fierce as any heart in torment torn." },
-  { word: "mother", line: "A mother's love doth burn as steady as the northern star, unmoved by time or tempest." },
-  { word: "gold", line: "O cursed gold, for thee do men betray their kin and sell their very souls." },
-  { word: "moon", line: "The moon doth hang, a silver coin upon the velvet purse of night." },
-  { word: "fool", line: "A fool doth think himself most wise, while wisdom knows itself a fool." },
-  { word: "sword", line: "This sword hath drunk the blood of kings, and thirsts for one draught more." },
-  { word: "garden", line: "In this fair garden every rose doth hide a thorn beneath its sweetness." },
-  { word: "wine", line: "Wine doth loosen every tongue and drown a thousand secrets in its cup." },
+// The model was fine-tuned on samples shaped like "SPEAKER:\nline\nline<eos>"
+// (see scripts/prepare_data.py). Prompting with just a speaker header is exactly
+// what it saw in training. These names all exist in the training data.
+const SPEAKERS = [
+  "HAMLET", "PORTIA", "KING LEAR", "FALSTAFF", "JULIET", "ROMEO", "IAGO", "OTHELLO",
+  "MACBETH", "LADY MACBETH", "PROSPERO", "ROSALIND", "CLEOPATRA", "MARK ANTONY",
+  "BRUTUS", "CASSIUS", "SHYLOCK", "BENEDICK", "VIOLA", "KING HENRY V",
+  "KING RICHARD III", "PETRUCHIO", "DESDEMONA", "ISABELLA", "TIMON", "CORIOLANUS",
+  "TITUS ANDRONICUS", "KING CLAUDIUS", "LEONTES", "HOTSPUR", "EDGAR", "KENT",
+  "FRIAR LAURENCE", "LORD POLONIUS", "PERICLES", "DUKE VINCENTIO", "HELENA", "IMOGEN",
 ];
 
-function buildFewShotPrompt(word: string) {
-  const examples = FEW_SHOT_EXAMPLES.map(
-    (e) => `Word: ${e.word}\nShakespeare says: "${e.line}"`
-  ).join("\n\n");
-  return `${examples}\n\nWord: ${word}\nShakespeare says: "`;
+const MAX_LINES = 3;
+const MAX_ATTEMPTS = 3;
+
+function pickSpeaker() {
+  return SPEAKERS[Math.floor(Math.random() * SPEAKERS.length)];
 }
 
-// No user input anymore -- the button just asks for a random line. We still
-// drive it off the proven few-shot/word scaffold (that's what produces clean,
-// well-formed Shakespearean sentences), we just pick the word ourselves
-// instead of taking it from a prompt.
-const RANDOM_SEED_WORDS = [
-  ...FEW_SHOT_EXAMPLES.map((e) => e.word),
-  "river", "silence", "ghost", "thunder", "betrayal", "ocean", "fire",
-  "mountain", "shadow", "dance", "hunger", "friendship", "storm", "mirror",
-  "dream", "poison", "crown", "whisper", "table",
-];
+function tidy(raw: string): string {
+  let lines = raw
+    .split("\n")
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
 
-function pickRandomSeedWord() {
-  return RANDOM_SEED_WORDS[Math.floor(Math.random() * RANDOM_SEED_WORDS.length)];
+  // If the model started a new "SPEAKER:" block, keep only the first speech.
+  const nextSpeech = lines.findIndex((line, index) => index > 0 && /^[A-Z][A-Z .'-]{2,}:$/.test(line));
+  if (nextSpeech !== -1) lines = lines.slice(0, nextSpeech);
+
+  lines = lines.slice(0, MAX_LINES);
+
+  // Generation stops at <eos>, but if it hit the token limit the last line may be cut off.
+  const endsCleanly = (line: string) => /[.!?;:]["']?$/.test(line);
+  if (lines.length > 1 && !endsCleanly(lines[lines.length - 1])) {
+    lines = lines.slice(0, -1);
+  }
+
+  let text = lines.join("\n");
+  text = text.replace(/[,;:\s-]+$/, ".");
+  if (!/[.!?]["']?$/.test(text)) text += ".";
+  return text;
+}
+
+function isUsable(text: string): boolean {
+  if (text.length < 25) return false;
+  if (text.split(/\s+/).length < 5) return false;
+  if (/[\[\]{}<>]/.test(text)) return false;
+  if (/\b[A-Z]{3,}\b/.test(text)) return false; // a speaker name or stage direction leaked in
+  return true;
 }
 
 export async function POST() {
-  console.log("[POST /api/generate] request received");
   try {
-    const seedWord = pickRandomSeedWord();
-    console.log("[POST /api/generate] seed word:", seedWord);
+    const generator = await getGenerator();
 
-    console.log("[POST /api/generate] calling initModel()...");
-    const gen = await initModel();
-    console.log("[POST /api/generate] initModel() returned, generator ready");
+    let best = "";
+    let speaker = pickSpeaker();
 
-    const fewShotPrompt = buildFewShotPrompt(seedWord);
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      speaker = pickSpeaker();
+      const prompt = `${speaker}:\n`;
 
-    console.log("[POST /api/generate] calling generator...");
-    const t1 = Date.now();
-    const results = await gen(fewShotPrompt, {
-      max_new_tokens: 27, // was 40 -- shorter budget makes it less likely to run past one clause into a second, unrelated one
-      min_new_tokens: 12, // don't let EOS/quote end generation after just 1-2 tokens
-      do_sample: true,
-      temperature: 0.7, // was 0.8 -- less drift
-      top_p: 0.85, // was 0.9 -- less drift
-      repetition_penalty: 1.3,
-      no_repeat_ngram_size: 3,
-      // Let the tokenizer strip the prompt via token offsets instead of us slicing
-      // generatedText by fewShotPrompt.length (raw JS string length). GPT-2's decode
-      // step (clean_up_tokenization_spaces) doesn't always reproduce the original
-      // prompt string byte-for-byte -- spacing around quotes/colons can shift -- so
-      // that manual slice landed in the wrong spot and usually grabbed the tail end
-      // of the prompt itself (which has a stray quote right there), which is why
-      // output was getting chopped down to 1-2 words.
-      return_full_text: false,
-    });
-    console.log(`[POST /api/generate] generation finished in ${Date.now() - t1}ms`);
+      const results = await generator(prompt, {
+        max_new_tokens: 60,
+        do_sample: true,
+        temperature: 0.85,
+        top_k: 50,
+        top_p: 0.92,
+        repetition_penalty: 1.1,
+        return_full_text: false,
+      });
 
-    const continuation: string = results[0]?.generated_text || "";
+      let generated: string = results?.[0]?.generated_text ?? "";
+      if (generated.startsWith(prompt)) generated = generated.slice(prompt.length);
 
-    // This fine-tuned model sprinkles stray `"` and `:` throughout its output -- an
-    // artifact of the play-script dialogue (character names, stage directions) it was
-    // trained on -- so cutting at the first `"` (the old approach) chopped the reply
-    // down to 1-2 words almost every time, even though the model had generated a full
-    // 40 tokens. Instead: find the boundary of the *next few-shot example* (a newline,
-    // or the literal "Word:" marker), strip stray quote characters from what's left,
-    // then trim down to the first full sentence.
-    const boundaryPoints = [
-      continuation.indexOf("\n"),
-      continuation.indexOf("Word:"),
-    ].filter((i) => i !== -1);
-    const boundaryAt = boundaryPoints.length > 0 ? Math.min(...boundaryPoints) : continuation.length;
-
-    let cleaned = continuation
-      .slice(0, Math.max(0, boundaryAt))
-      .replace(/"/g, " ") // space, not "" -- a quote sitting between two words with no
-      // surrounding whitespace (e.g. `his"She`) would otherwise weld them into
-      // `hisShe`; the following \s+ -> " " collapses any doubled-up spacing this adds
-      .replace(/\s+/g, " ")
-      .trim();
-
-    // The training data was raw play-script lines (stage directions, act/scene
-    // headers, speaker names all mixed in with actual dialogue, no separation) --
-    // so the model itself learned to reproduce that formatting noise as part of
-    // its "style". We can't un-teach that without retraining, so strip it out of
-    // the output here instead: remove bracket/paren stage notes, ACT/SCENE
-    // headers, stage-direction verbs ("Enter", "Exeunt", ...) and runs of
-    // ALL-CAPS words (character names / speaker tags like "CLIFFORD" or
-    // "ALAN HUGH WESTORSDALE").
-    cleaned = cleaned
-      .replace(/\[[^\]]*\]?/g, " ")
-      .replace(/\([^)]*\)?/g, " ")
-      .replace(/[\[\]()]/g, " ") // safety net: strip any stray unmatched bracket the paired removals above missed
-      .replace(/\b(?:ACT|SCENE)\s+[IVXLCDM]+\b\.?/gi, " ")
-      .replace(/\b(?:Enter|Exit|Exeunt|Re-enter|Alarum|Flourish|Prologue)\b[^.!?:;,\-]*/gi, " ")
-      .replace(/\b(?:[A-Z]{2,}\s+){1,3}[A-Z]{2,}\b/g, " ") // multi-word ALL-CAPS name runs
-      .replace(/\b[A-Z]{2,}\b/g, " ") // single ALL-CAPS words (e.g. a lone speaker tag)
-      .replace(/\s+([,.;:!?])/g, "$1") // no space before punctuation left behind by a removal
-      .replace(/[,;:\-]+(?=[.!?])/g, "") // drop stray punctuation sitting right before a terminal mark, e.g. "song:."
-      .replace(/([,;:\-])(?:\s*[,;:\-])+/g, "$1") // collapse doubled-up punctuation from adjacent removals
-      .replace(/\s+/g, " ")
-      .replace(/^[\s,;:\-]+/, "")
-      .replace(/[\s,;:\-]+$/, "")
-      .trim();
-
-    // NOTE: we used to cut down to the first full sentence here (first ".", "!", or
-    // "?"). That was a regression the first time around -- this model loves short
-    // Shakespearean interjections ("Hark!", "Fie!", "Pray!") that show up in the
-    // first few words and already end in "!", so a naive "stop at first sentence-end"
-    // rule kept chopping every reply down to just the interjection.
-    //
-    // This version avoids that: it only treats [.!?] as a real sentence boundary if
-    // (a) it comes after a minimum length (so early interjections don't qualify) and
-    // (b) it's followed by a capital letter or the end of the string (so it's not,
-    // say, a "Mr." or an abbreviation mid-clause). If no such boundary is found, we
-    // fall back to the existing length-based trim below -- so this can only ever
-    // shorten output further, never reintroduce the old bug on a fresh generation.
-    const MIN_SENTENCE_LEN = 25;
-    const sentenceEndRe = /[.!?](?=\s+[A-Z]|\s*$)/g;
-    let sentenceCut = -1;
-    let match: RegExpExecArray | null;
-    while ((match = sentenceEndRe.exec(cleaned)) !== null) {
-      if (match.index >= MIN_SENTENCE_LEN) {
-        sentenceCut = match.index + 1; // include the punctuation itself
-        break;
+      const text = tidy(generated);
+      if (!best) best = text; // fallback if every attempt fails the quality gate
+      if (isUsable(text)) {
+        return Response.json({ text, speaker, model: "GPT-2 fine-tuned on Shakespeare" });
       }
     }
-    if (sentenceCut !== -1) {
-      cleaned = cleaned.slice(0, sentenceCut).trim();
-    } else if (cleaned.length > 220) {
-      const lastBreak = cleaned.slice(0, 220).lastIndexOf(" ");
-      cleaned = cleaned.slice(0, lastBreak > 0 ? lastBreak : 220).trim();
+
+    if (best) {
+      return Response.json({ text: best, speaker, model: "GPT-2 fine-tuned on Shakespeare" });
     }
-
-    const text = cleaned;
-
-    return Response.json({
-      text: text || "Verily, thy words hath moved my soul.",
-      model: "GPT-2 Fine-tuned on Shakespeare",
-    });
+    return Response.json({ error: "The model produced no usable text. Try again." }, { status: 502 });
   } catch (error) {
-    // Log as a plain string only — passing the raw error object to
-    // console.error/console.log can trip Next's terminal code-frame
-    // formatter and throw a second, unrelated error that swallows
-    // this response before it's sent.
+    // Log as a plain string: passing the raw error object to console.error can trip
+    // Next's terminal code-frame formatter and swallow the response.
     const message = error instanceof Error ? error.message : String(error);
-    const stack = error instanceof Error ? error.stack : undefined;
-    process.stdout.write(`[POST /api/generate] Generation error: ${message}\n`);
-    if (stack) process.stdout.write(stack + "\n");
-
-    return Response.json(
-      {
-        error: "Generation failed.",
-        details: message,
-      },
-      { status: 500 }
-    );
+    process.stdout.write(`[generate] error: ${message}\n`);
+    return Response.json({ error: "Generation failed.", details: message }, { status: 500 });
   }
 }

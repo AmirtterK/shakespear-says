@@ -5,57 +5,67 @@ Shakespeare Says
 ![Shakespeare](public/shakespeare.jpg)
 
 Shakespeare Says is a small web app with a single button: press it, and a
-GPT-2 model fine-tuned on Shakespeare's plays generates a random line of
-Shakespearean-style text.
-
-## Idea
-
-The goal was to see how far a small language model, trained only on the
-public-domain text of Shakespeare's plays, could go in mimicking his voice
-and manner of speaking -- not quoting or copy-pasting existing lines, but
-generating new ones in a similar style: archaic vocabulary, inverted
-sentence structure, and the rhythm of Elizabethan dialogue.
+GPT-2 model fine-tuned on Shakespeare's plays generates a short, new passage
+in his style.
 
 ## How it works
 
-- **Model**: a GPT-2 model fine-tuned from scratch on the full text of
-  Shakespeare's plays (`scripts/train_gpt2.py`). The fine-tuned weights are
-  exported to ONNX (`shakespeare-gpt2-onnx`) so they can run directly in the
-  Next.js server without a Python backend.
-- **Generation**: the app seeds the model with a short few-shot prompt built
-  from a random word, then samples a continuation from it
-  (`src/app/api/generate/route.ts`). The raw output is cleaned up afterward
-  to strip leftover formatting artifacts the model picked up from the
-  training data (stage directions, act/scene headers, character names) and
-  to trim it down to a single line.
-- **Frontend**: a single page (`src/app/page.tsx`) with one button. Each
-  press calls the generation API and displays the resulting line.
-- There is also an earlier, simpler word-level n-gram model
-  (`scripts/train_shakespeare.py`) kept in the repo for reference; the app
-  itself runs on the fine-tuned GPT-2 model.
+- **Data** (`scripts/prepare_data.py`): `data/raw/Shakespeare_data.csv` is
+  cleaned into speaker-formatted samples. Stage directions, act/scene headers
+  and inline `[Aside]`-style notes are dropped; lines are grouped into speeches
+  and cut into chunks of up to 4 lines:
+
+  ```
+  HAMLET:
+  To be, or not to be, that is the question:
+  Whether 'tis nobler in the mind to suffer
+  ```
+
+- **Model** (`scripts/train_gpt2.py`): GPT-2 (124M) fine-tuned from the base
+  `gpt2` weights on those samples, each ending in a real `<eos>` so the model
+  learns to stop. A 5% held-out validation set picks the best epoch.
+- **Export** (`scripts/export_onnx.py`): the checkpoint is exported to ONNX
+  with `optimum`, int8-quantized, and checked against the fp32 export
+  (perplexity + greedy continuations). The output folder matches what
+  `@xenova/transformers` loads: `src/lib/shakespeare-gpt2-onnx/`.
+- **Generation** (`src/app/api/generate/route.ts`): the API prompts the model
+  with just a random speaker header (`"PORTIA:\n"`), the same format it was
+  trained on, samples with moderate settings (temperature 0.85, top-k 50,
+  top-p 0.92, repetition penalty 1.1), and lightly tidies the result.
+- **Frontend**: a single page (`src/app/page.tsx`) with one button.
+- `scripts/train_shakespeare.py` is an older word-level n-gram model kept for
+  reference; the app does not use it.
 
 ## Running locally
 
-The fine-tuned model weights are not stored in this repository (they are
-large binary files, kept locally instead -- see `.gitignore`). To run the
-app you need the model files present under `src/lib/shakespeare-gpt2-onnx`
-on your own machine.
+The model weights are not in git (see `.gitignore`). Put the exported model in
+`src/lib/shakespeare-gpt2-onnx/` (see "Retraining" below), then:
 
 ```bash
 npm install
 npm run dev
 ```
 
-Then open [http://localhost:3000](http://localhost:3000).
+Open [http://localhost:3000](http://localhost:3000). With the dev server
+running, `node test_generation.mjs` generates 20 lines and checks them for
+formatting problems, repeats, and leaked stage directions. Always read the
+samples it prints too.
 
-## Training
+## Retraining (Google Colab, free T4 GPU)
 
-If you want to retrain the model from the Shakespeare dataset:
+1. Open `colab/shakespeare_says_retrain.ipynb` in Colab and switch the
+   runtime to a T4 GPU.
+2. Run the cells. When asked to upload files, pick `data/raw/Shakespeare_data.csv`
+   and the three scripts `prepare_data.py`, `train_gpt2.py`, `export_onnx.py`.
+3. Download `shakespeare-gpt2-onnx.zip` at the end, unzip it into `src/lib/`
+   (replacing the old `shakespeare-gpt2-onnx` folder), and restart `npm run dev`.
 
-```bash
-npm run train:gpt2
-```
+The same scripts also run locally (`npm run prepare:data`, `npm run train:gpt2`,
+`npm run export:onnx`) if you have a CUDA GPU and the pinned packages from the
+notebook: `transformers==4.46.3`, `optimum[onnxruntime]==1.23.3`,
+`onnx==1.17.0`, `onnxruntime==1.20.1`, `torch==2.5.1`.
 
-This reads `shakespear.zip`, extracts and cleans the dialogue lines, and
-fine-tunes a base GPT-2 model on them, saving the result to
-`src/lib/shakespeare-gpt2`.
+Notes on the export: by default only matrix multiplications are quantized
+(`QUANT_OPS=MatMul`), which keeps quality close to fp32 at the cost of a larger
+file than quantizing embeddings too. Set `INCLUDE_FP32=1` to also ship the fp32
+model, or `QUANT_OPS=MatMul,Gather` for a smaller, lower-quality file.

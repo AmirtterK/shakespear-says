@@ -100,7 +100,7 @@ export default function Home() {
               className="space-y-4"
             >
               <div className="rounded-lg bg-secondary/50 border p-4">
-                <p className="text-base leading-7 text-foreground">
+                <p className="text-base leading-7 text-foreground whitespace-pre-line">
                   {result.text}
                 </p>
               </div>

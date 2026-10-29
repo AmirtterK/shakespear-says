@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "next dev --webpack",
     "build": "next build",
+    "prepare:data": "python scripts/prepare_data.py",
     "train:gpt2": "python scripts/train_gpt2.py",
+    "export:onnx": "python scripts/export_onnx.py",
     "train:shakespeare": "python scripts/train_shakespeare.py",
     "start": "next start",
     "lint": "eslint"
