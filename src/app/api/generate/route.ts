@@ -1,30 +1,4 @@
-import { pipeline, env } from "@xenova/transformers";
-import path from "path";
-
-// Load the model from disk (src/lib/shakespeare-gpt2-onnx), never from the Hugging Face Hub.
-env.allowRemoteModels = false;
-env.localModelPath = path.join(process.cwd(), "src", "lib");
-
-// Keep the loaded pipeline across hot reloads / requests so the model is only read once.
-const globalForModel = globalThis as unknown as { __shakespeareGenerator?: Promise<any> };
-
-function getGenerator() {
-  if (!globalForModel.__shakespeareGenerator) {
-    const started = Date.now();
-    globalForModel.__shakespeareGenerator = pipeline("text-generation", "shakespeare-gpt2-onnx", {
-      quantized: true, // loads onnx/decoder_model_merged_quantized.onnx
-    })
-      .then((generator) => {
-        console.log(`[generate] model loaded in ${Date.now() - started}ms`);
-        return generator;
-      })
-      .catch((error) => {
-        globalForModel.__shakespeareGenerator = undefined; // allow a retry on the next request
-        throw error;
-      });
-  }
-  return globalForModel.__shakespeareGenerator;
-}
+import { getModel } from "@/lib/model-manager";
 
 // The model was fine-tuned on samples shaped like "SPEAKER:\nline\nline<eos>"
 // (see scripts/prepare_data.py). Prompting with just a speaker header is exactly
@@ -79,7 +53,7 @@ function isUsable(text: string): boolean {
 
 export async function POST() {
   try {
-    const generator = await getGenerator();
+    const generator = await getModel();
 
     let best = "";
     let speaker = pickSpeaker();

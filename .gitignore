@@ -43,9 +43,18 @@ test_generation.log
 # vercel
 .vercel
 
-# large model weights — too big for git, handled separately
-/src/lib/shakespeare-gpt2/model.safetensors
-/src/lib/shakespeare-gpt2-onnx/onnx/*.onnx
+# large model weights & exports — too big for git, handled separately
+*.onnx
+*.onnx_data
+*.safetensors
+*.bin
+*.zip
+*.tar.gz
+shakespeare-gpt2-onnx/
+/src/lib/shakespeare-gpt2-onnx/onnx/
+/src/lib/shakespeare-gpt2/
+build/
+colab/*.zip
 
 # typescript
 *.tsbuildinfo
