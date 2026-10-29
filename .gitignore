@@ -53,8 +53,18 @@ test_generation.log
 shakespeare-gpt2-onnx/
 /src/lib/shakespeare-gpt2-onnx/onnx/
 /src/lib/shakespeare-gpt2/
+/src/lib/shakespeare-model.json
 build/
 colab/*.zip
+
+# duplicate / generated data
+/data/raw/alllines.txt
+/data/raw/william-shakespeare-black-silhouette.jpg
+/scripts/Shakespeare_data.csv
+
+# leftover scripts & files
+test_generation_random.mjs
+CLAUDE.md
 
 # typescript
 *.tsbuildinfo
