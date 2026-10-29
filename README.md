@@ -17,10 +17,10 @@ cd shakespear-says
 
 ### 2. Download the ONNX model
 
-The model weights are **not** included in the repo (they're ~244 MB).
-Download the zip from Google Drive:
+The model weights are **not** included in the repo (they're ~204 MB).
+Download the zip from GitHub Releases:
 
-> **[Download shakespeare-gpt2-onnx.zip](https://drive.google.com/file/d/1w09MhZ7-cEPnNVCwhavbdJuuYNNb4iet/view?usp=drive_link)**
+> **[Download shakespeare-gpt2-onnx.zip](https://github.com/AmirtterK/shakespear-says/releases/download/v1/shakespeare-gpt2-onnx.zip)**
 
 ### 3. Extract the model
 
