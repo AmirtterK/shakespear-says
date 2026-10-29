@@ -2,9 +2,7 @@
 
 <img src="public/shakespeare.png" alt="Shakespeare" width="120">
 
-Shakespeare Says is a small web app with a single button: press it, and a
-GPT-2 model fine-tuned on Shakespeare's plays generates a short, new passage
-in his style.
+A GPT-2 powered web app that generates Shakespeare-style passages at the click of a button.
 
 ---
 
