@@ -2,7 +2,7 @@
 
 <img src="public/shakespeare.png" alt="Shakespeare" width="120">
 
-A text generator that produces Shakespearean-style lines. Built on a GPT-2 model tuned on Shakespeare's works and run fully locally via a quantized ONNX model.
+A text generator that produces Shakespearean-style lines, powered by a GPT-2 model fine-tuned on Shakespeare's works and running entirely locally through a quantized ONNX model.
 
 ---
 
